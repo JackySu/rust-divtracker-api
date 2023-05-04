@@ -1,0 +1,20 @@
+[package]
+name = "rust-divtracker-api"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+rocket = { version = "0.5.0-rc.2", features = ["json"] }
+sqlx = { version = "0.7.0-alpha.2", features = ["runtime-tokio-native-tls", "sqlite"] }
+tokio = { version = "1", features = ["full"] }
+serde_json = "1.0"
+
+reqwest = { version = "0.11", features = ["json"] }
+rocket-governor = { version = "0.1.0-rc.4", features = ["limit_info"] }
+
+dotenv = "0.15"
+base64 = "0.21"
+chrono = { version = "0.4", features = ["serde"] }
+lazy_static = "1.4"
