@@ -18,3 +18,10 @@ pub struct D1PlayerStats {
     pub gear_score: u64,
     pub all_names: Vec<String>,
 }
+
+#[derive(Serialize, Deserialize, Debug)]
+#[serde(crate = "rocket::serde")]
+pub struct ProfileDTO {
+    pub id: String,
+    pub name: String,
+}

@@ -5,7 +5,7 @@ use std::sync::Mutex;
 use lazy_static::lazy_static;
 use chrono::{DateTime, Utc};
 
-use crate::model::div1::D1PlayerStats;
+use crate::model::div1::{D1PlayerStats, ProfileDTO};
 use crate::db::user::{create_user, get_user_names_by_id, store_user_name};
 use crate::util;
 
@@ -52,7 +52,7 @@ pub async fn login_ubi() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-pub async fn find_player_id(name: &str) -> Result<String, Box<dyn std::error::Error>> {
+pub async fn find_player_id(name: &str) -> Result<ProfileDTO, Box<dyn std::error::Error>> {
     let expiration = UBI_EXPIRATION.lock().unwrap().clone();
     let mut exp = DateTime::parse_from_rfc3339(&expiration)
         .unwrap()
@@ -104,11 +104,17 @@ pub async fn find_player_id(name: &str) -> Result<String, Box<dyn std::error::Er
         return Err("Failed to find player".into());
     }
 
-    let player_id = resp["profiles"][0]["profileId"]
-        .as_str()
-        .unwrap()
-        .to_string();
-    Ok(player_id)
+    Ok(ProfileDTO { 
+        id: resp["profiles"][0]["profileId"]
+            .as_str()
+            .unwrap()
+            .to_string(),
+        name: resp["profiles"][0]["nameOnPlatform"]
+            .as_str()
+            .unwrap()
+            .to_string(), 
+        }
+    )
 }
 
 pub static DIV1_SPACE_ID: &str = "6edd234a-abff-4e90-9aab-b9b9c6e49ff7";
@@ -129,15 +135,16 @@ pub async fn get_div1_player_stats(
     let session_id = UBI_SESSION_ID.lock().unwrap().clone();
     headers.insert("Ubi-SessionId", (*session_id).parse::<HeaderValue>().unwrap());
 
-    let player_id = find_player_id(name).await?;
-    let url = format!("https://public-ubiservices.ubi.com/v1/profiles/{}/statscard?spaceId={}", player_id, DIV1_SPACE_ID);
+    let profile = find_player_id(name).await?;
 
-    match create_user(pool, &player_id).await {
-        Ok(_) => println!("Created or update user {}", &player_id),
+    let url = format!("https://public-ubiservices.ubi.com/v1/profiles/{}/statscard?spaceId={}", &profile.id, DIV1_SPACE_ID);
+
+    match create_user(pool, &profile.id).await {
+        Ok(_) => println!("Created or update user {}", &profile.id),
         Err(e) => return Err(e.0.into()),
     }
-    match store_user_name(pool, &player_id, &name).await {
-        Ok(_) => println!("Stored name {} for user {}", &name, &player_id),
+    match store_user_name(pool, &profile.id, &profile.name).await {
+        Ok(_) => println!("Stored name {} for user {}", &profile.name, &profile.id),
         Err(e) => return Err(e.0.into()),
     }
 
@@ -158,14 +165,14 @@ pub async fn get_div1_player_stats(
         return Err("incomplete data".into());
     }
 
-    let names = match get_user_names_by_id(pool, &player_id).await {
+    let names = match get_user_names_by_id(pool, &profile.id).await {
         Ok(names) => names,
         Err(e) => return Err(e.0.into()),
     }; 
 
     Ok(D1PlayerStats {
-        id: player_id,
-        name: name.to_string(),
+        id: profile.id,
+        name: profile.name,
         level: stats[0]["value"].as_str().unwrap().parse::<u64>().unwrap(),
         dz_rank: stats[1]["value"].as_str().unwrap().parse::<u64>().unwrap(),
         ug_rank: stats[2]["value"].as_str().unwrap().parse::<u64>().unwrap(),

@@ -1,5 +1,5 @@
 use super::DBResult;
-use rocket::futures::{stream::TryStreamExt, future::TryFutureExt};
+use rocket::futures::{stream::TryStreamExt};
 use sqlx::{Pool, Sqlite};
 
 pub async fn get_user_names_by_id(pool: &Pool<Sqlite>, id: &str) -> DBResult<Vec<String>> {
