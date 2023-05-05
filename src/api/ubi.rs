@@ -96,25 +96,15 @@ pub async fn find_player_id(name: &str) -> Result<ProfileDTO, Box<dyn std::error
         .json::<Value>()
         .await?;
 
-    if !resp["errorCode"].is_null() {
-        println!("{:#?}", resp);
-        return Err("Failed to find player".into());
-    }
-    if resp.is_array() && resp.as_array().unwrap().len() == 0 {
-        return Err("Failed to find player".into());
+    let profiles = &resp["profiles"];
+    if profiles.is_array() && profiles.as_array().unwrap().is_empty() {
+        return Err(format!("Failed to find player {}", name).into());
     }
 
     Ok(ProfileDTO { 
-        id: resp["profiles"][0]["profileId"]
-            .as_str()
-            .unwrap()
-            .to_string(),
-        name: resp["profiles"][0]["nameOnPlatform"]
-            .as_str()
-            .unwrap()
-            .to_string(), 
-        }
-    )
+        id: profiles[0]["profileId"].as_str().unwrap().to_string(),
+        name: profiles[0]["nameOnPlatform"].as_str().unwrap().to_string(),
+    })
 }
 
 pub static DIV1_SPACE_ID: &str = "6edd234a-abff-4e90-9aab-b9b9c6e49ff7";
