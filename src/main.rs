@@ -16,7 +16,7 @@ use rocket_governor::RocketGovernor;
 
 use model::response::Response;
 use middleware::{governor::RateLimitGuard, catcher::{exceed_rate_limit, not_found, internal_server_error}};
-use api::wrapper::{get_div1_player_stats};
+use api::wrapper::{get_div1_player_stats, get_div2_player_stats};
 use api::ubi::login_ubi;
 
 use sqlx::{Pool, Sqlite, SqlitePool};
@@ -35,7 +35,14 @@ async fn get_div1_player_stats_by_name(_limitguard: RocketGovernor<'_, RateLimit
     )
 }
 
-// TODO: Add div2 endpoint
+#[get("/div2/<name>")]
+async fn get_div2_player_stats_by_name(_limitguard: RocketGovernor<'_, RateLimitGuard>, pool: &State<Pool<Sqlite>>, name: &str) -> status::Custom<Json<Response>> {
+    let stats = get_div2_player_stats(pool, name).await;
+    status::Custom(
+        Status::from_code(stats.status_code).unwrap(),
+        Json(stats.response),
+    )
+}
 
 #[rocket::main]
 async fn main() -> Result<(), rocket::Error> {
@@ -51,8 +58,12 @@ async fn main() -> Result<(), rocket::Error> {
         .expect("Couldn't migrate the database tables");
     
     let _rocket = rocket::build()
-        .mount("/", routes![index, get_div1_player_stats_by_name])
-        .register("/", catchers![not_found, exceed_rate_limit,internal_server_error])
+        .mount("/", routes![
+            index, get_div1_player_stats_by_name, get_div2_player_stats_by_name
+        ])
+        .register("/", catchers![
+            not_found, exceed_rate_limit, internal_server_error
+        ])
         .manage(pool)
         .launch()
         .await?;
