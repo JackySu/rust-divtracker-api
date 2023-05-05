@@ -15,9 +15,9 @@ use rocket::serde::json::Json;
 use rocket_governor::RocketGovernor;
 
 use model::response::Response;
-
-use middleware::governor::RateLimitGuard;
+use middleware::{governor::RateLimitGuard, catcher::{exceed_rate_limit, not_found, internal_server_error}};
 use api::wrapper::{get_div1_player_stats};
+use api::ubi::login_ubi;
 
 use sqlx::{Pool, Sqlite, SqlitePool};
 
@@ -44,13 +44,15 @@ async fn main() -> Result<(), rocket::Error> {
         .await
         .expect("Couldn't connect to sqlite database");
 
+    let _ = login_ubi().await;
     sqlx::migrate!()
         .run(&pool)
         .await
         .expect("Couldn't migrate the database tables");
-
+    
     let _rocket = rocket::build()
         .mount("/", routes![index, get_div1_player_stats_by_name])
+        .register("/", catchers![not_found, exceed_rate_limit,internal_server_error])
         .manage(pool)
         .launch()
         .await?;

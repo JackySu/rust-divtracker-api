@@ -29,6 +29,7 @@ pub enum ApiStatus {
     Forbidden,
     NotFound,
     InternalServerError,
+    TooManyRequests,
 }
 
 impl ApiStatus {
@@ -41,6 +42,7 @@ impl ApiStatus {
             ApiStatus::Forbidden => 403,
             ApiStatus::NotFound => 404,
             ApiStatus::InternalServerError => 500,
+            ApiStatus::TooManyRequests => 429,
         }
     }
 }
@@ -55,6 +57,7 @@ impl Display for ApiStatus {
             ApiStatus::Forbidden => write!(f, "{}", message::STATUS_FORBIDDEN),
             ApiStatus::NotFound => write!(f, "{}", message::STATUS_NOT_FOUND),
             ApiStatus::InternalServerError => write!(f, "{}", message::STATUS_INTERNAL_SERVER_ERROR),
+            ApiStatus::TooManyRequests => write!(f, "{}", message::STATUS_TOO_MANY_REQUESTS),
         }
     }
 }
