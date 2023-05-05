@@ -167,7 +167,7 @@ pub async fn get_div1_player_stats(
         dz_rank: stats[1]["value"].as_str().unwrap().parse::<u64>().unwrap_or(0),
         ug_rank: stats[2]["value"].as_str().unwrap().parse::<u64>().unwrap_or(0),
         playtime: stats[3]["value"].as_str().unwrap().parse::<u64>().unwrap_or(0) / 3600,
-        main_story: stats[4]["value"].as_str().unwrap_or("0").to_string(),
+        main_story: stats[4]["value"].as_str().unwrap_or("0").parse::<f32>().unwrap_or(0f32) * 100f32,
         rogue_kills: stats[5]["value"].as_str().unwrap().parse::<u64>().unwrap_or(0),
         items_extracted: stats[6]["value"].as_str().unwrap().parse::<u64>().unwrap_or(0),
         skill_kills: stats[7]["value"].as_str().unwrap().parse::<u64>().unwrap_or(0),

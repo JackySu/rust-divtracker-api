@@ -10,7 +10,7 @@ pub struct D1PlayerStats {
     pub dz_rank: u64,
     pub ug_rank: u64,
     pub playtime: u64,
-    pub main_story: String,
+    pub main_story: f32,
     pub total_kills: u64,
     pub rogue_kills: u64,
     pub items_extracted: u64,
