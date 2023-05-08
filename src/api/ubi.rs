@@ -7,7 +7,7 @@ use std::sync::Mutex;
 
 use futures::{future::join_all, stream, StreamExt, TryStreamExt};
 
-use crate::db::user::{create_user, get_user_id_by_name, get_user_names_by_id, store_user_name};
+use crate::db::user::{create_user, get_user_id_by_name, get_user_names_by_id, store_user_name, self};
 use crate::model::div::{D1PlayerStats, D2PlayerStats};
 use crate::model::ubi::{ProfileDTO, StatsDTO};
 use crate::util;
@@ -56,33 +56,28 @@ pub async fn login_ubi() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-pub async fn find_player_id(
+pub async fn find_player_id_by_db(
     pool: &Pool<Sqlite>,
     name: &str,
 ) -> Result<Vec<ProfileDTO>, Box<dyn std::error::Error>> {
-    let ids = get_user_id_by_name(pool, name).await;
-
-    let mut results: Vec<ProfileDTO> = Vec::new();
-    match ids {
-        Ok(ids) => {
-            if ids.len() > 0 {
-                results = ids
-                    .iter()
-                    .map(|id| ProfileDTO {
-                        id: id.to_owned(),
-                        name: None,
-                    })
-                    .collect::<Vec<ProfileDTO>>();
-            }
-        }
-        Err(e) => {
-            println!(
-                "Failed to get user id by name {} in database: {:?}",
-                name, e
-            );
-        }
+    let ids = match get_user_id_by_name(pool, name).await {
+        Ok(id) => id,
+        Err(_) => return Err(format!("Failed to find player {} in db", name).into()),
+    };
+    let mut profiles = Vec::new();
+    for id in ids {
+        profiles.push(ProfileDTO {
+            id: id,
+            name: None,
+        });
     }
+    Ok(profiles)
+}
 
+
+pub async fn find_player_id_by_api(
+    name: &str,
+) -> Result<Vec<ProfileDTO>, Box<dyn std::error::Error>> {
     let expiration = UBI_EXPIRATION.lock().unwrap().clone();
     let mut exp = DateTime::parse_from_rfc3339(&expiration)
         .unwrap()
@@ -130,17 +125,16 @@ pub async fn find_player_id(
         .await?;
 
     let profiles = &resp["profiles"];
-    if profiles.is_array() && profiles.as_array().unwrap().is_empty() && results.is_empty() {
-        return Err(format!("Failed to find player {}", name).into());
+    if profiles.is_array() && profiles.as_array().unwrap().is_empty() {
+        return Err(format!("Failed to find player {} by api", name).into());
     }
 
-    for p in profiles.as_array().unwrap() {
-        results.push(ProfileDTO {
+    Ok(profiles.as_array().unwrap().into_iter().map(|p| {
+        ProfileDTO {
             id: p["profileId"].as_str().unwrap().to_string(),
             name: Some(p["nameOnPlatform"].as_str().unwrap().to_string()),
-        });
-    }
-    Ok(results)
+        }
+    }).collect::<Vec<ProfileDTO>>())
 }
 
 pub async fn get_player_stats_by_name(
@@ -161,8 +155,13 @@ pub async fn get_player_stats_by_name(
         (*session_id).parse::<HeaderValue>().unwrap(),
     );
 
-    let mut profiles = find_player_id(pool, name).await?;
-    profiles.dedup_by(|a, b| a.id == b.id);
+    let mut profiles = match find_player_id_by_api(name).await {
+        Ok(profiles) => profiles,
+        Err(_) => Vec::new(),
+    };
+    if profiles.is_empty() {
+        profiles = find_player_id_by_db(pool, name).await?;
+    }
 
     let mut results: Vec<StatsDTO> = Vec::new();
     let urls = profiles
