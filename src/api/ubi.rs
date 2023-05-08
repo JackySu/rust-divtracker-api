@@ -70,7 +70,6 @@ pub async fn find_player_id(
                     .iter()
                     .map(|id| ProfileDTO {
                         id: id.to_owned(),
-                        in_db: true,
                         name: None,
                     })
                     .collect::<Vec<ProfileDTO>>();
@@ -139,7 +138,6 @@ pub async fn find_player_id(
         results.push(ProfileDTO {
             id: p["profileId"].as_str().unwrap().to_string(),
             name: Some(p["nameOnPlatform"].as_str().unwrap().to_string()),
-            in_db: false,
         });
     }
     Ok(results)
@@ -163,7 +161,8 @@ pub async fn get_player_stats_by_name(
         (*session_id).parse::<HeaderValue>().unwrap(),
     );
 
-    let profiles = find_player_id(pool, name).await?;
+    let mut profiles = find_player_id(pool, name).await?;
+    profiles.dedup_by(|a, b| a.id == b.id);
 
     let mut results: Vec<StatsDTO> = Vec::new();
     let urls = profiles
@@ -190,7 +189,7 @@ pub async fn get_player_stats_by_name(
             println!("{:#?}", resp);
             return Err("Failed to login to Ubi".into());
         }
-        let profile = &profiles[i].clone();
+        let profile = &mut profiles[i];
         match create_user(&pool, &profile.id).await {
             Ok(_) => println!("Created or update user {}", &profile.id),
             Err(e) => {
@@ -222,9 +221,11 @@ pub async fn get_player_stats_by_name(
                         .as_str()
                         .unwrap()
                         .to_string();
+                profile.name = Some(res.clone());
                 res
             }
         };
+
         match store_user_name(&pool, &profile.id, &name).await {
             Ok(_) => println!("Stored name {} for user {}", &name, &profile.id),
             Err(e) => {
@@ -262,12 +263,7 @@ pub async fn get_div1_player_stats(
                     dz_rank: s[1]["value"].as_str().unwrap().parse::<u64>().unwrap_or(0),
                     ug_rank: s[2]["value"].as_str().unwrap().parse::<u64>().unwrap_or(0),
                     playtime: s[3]["value"].as_str().unwrap().parse::<u64>().unwrap_or(0) / 3600,
-                    main_story: s[4]["value"]
-                        .as_str()
-                        .unwrap_or("0")
-                        .parse::<f32>()
-                        .unwrap_or(0f32)
-                        * 100f32,
+                    main_story: s[4]["value"].as_str().unwrap_or("0 %").to_string(),
                     rogue_kills: s[5]["value"].as_str().unwrap().parse::<u64>().unwrap_or(0),
                     items_extracted: s[6]["value"].as_str().unwrap().parse::<u64>().unwrap_or(0),
                     skill_kills: s[7]["value"].as_str().unwrap().parse::<u64>().unwrap_or(0),
