@@ -179,7 +179,7 @@ pub async fn get_player_stats_by_name(
     let stream =
         futures::stream::iter(urls).map(|url| client.get(&url).headers(headers.clone()).send());
 
-    let mut stream = stream.buffer_unordered(10);
+    let mut stream = stream.buffered(10);
 
     let mut i = 0;
     while let Some(result) = stream.next().await {
