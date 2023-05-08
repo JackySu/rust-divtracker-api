@@ -241,6 +241,9 @@ pub async fn get_player_stats_by_name(
         i += 1;
     }
 
+    if results.is_empty() {
+        return Err("Failed to find player by either api or db".into());
+    }
     Ok(results)
 }
 
