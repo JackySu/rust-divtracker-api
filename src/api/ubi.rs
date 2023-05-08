@@ -242,7 +242,7 @@ pub async fn get_player_stats_by_name(
     }
 
     if results.is_empty() {
-        return Err("Failed to find player by either api or db".into());
+        return Err(format!("Failed to find player {} by either api or db", name).into());
     }
     Ok(results)
 }
