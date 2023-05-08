@@ -1,11 +1,14 @@
 use rocket::serde::{Serialize, Deserialize};
 use serde_json::Value;
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(crate = "rocket::serde")]
 pub struct ProfileDTO {
     pub id: String,
-    pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(skip_serializing)]
+    pub in_db: bool,
 }
 
 #[derive(Serialize, Deserialize, Debug)]

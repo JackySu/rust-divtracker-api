@@ -1724,6 +1724,7 @@ dependencies = [
  "base64",
  "chrono",
  "dotenv",
+ "futures",
  "lazy_static",
  "reqwest",
  "rocket",
