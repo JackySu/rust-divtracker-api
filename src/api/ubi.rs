@@ -1,13 +1,14 @@
 use chrono::{DateTime, Utc};
 use lazy_static::lazy_static;
 use reqwest::{self, header::HeaderValue};
-use serde_json::Value;
-use sqlx::{pool, Pool, Sqlite};
+use thirtyfour::prelude::*;
+use serde_json::{from_str, Value};
+use sqlx::{Pool, Sqlite};
 use std::sync::Mutex;
 
-use futures::{future::join_all, stream, StreamExt, TryStreamExt};
+use futures::{future::join_all, StreamExt};
 
-use crate::db::user::{create_user, get_user_id_by_name, get_user_names_by_id, store_user_name, self};
+use crate::db::user::{create_user, get_user_id_by_name, get_user_names_by_id, store_user_name};
 use crate::model::div::{D1PlayerStats, D2PlayerStats};
 use crate::model::ubi::{ProfileDTO, StatsDTO};
 use crate::util;
@@ -66,14 +67,10 @@ pub async fn find_player_id_by_db(
     };
     let mut profiles = Vec::new();
     for id in ids {
-        profiles.push(ProfileDTO {
-            id: id,
-            name: None,
-        });
+        profiles.push(ProfileDTO { id: id, name: None });
     }
     Ok(profiles)
 }
-
 
 pub async fn find_player_id_by_api(
     name: &str,
@@ -129,12 +126,29 @@ pub async fn find_player_id_by_api(
         return Err(format!("Failed to find player {} by api", name).into());
     }
 
-    Ok(profiles.as_array().unwrap().into_iter().map(|p| {
-        ProfileDTO {
+    Ok(profiles
+        .as_array()
+        .unwrap()
+        .into_iter()
+        .map(|p| ProfileDTO {
             id: p["profileId"].as_str().unwrap().to_string(),
             name: Some(p["nameOnPlatform"].as_str().unwrap().to_string()),
-        }
-    }).collect::<Vec<ProfileDTO>>())
+        })
+        .collect::<Vec<ProfileDTO>>())
+}
+
+pub async fn get_player_profiles_by_name(
+    pool: &Pool<Sqlite>,
+    name: &str,
+) -> Result<Vec<ProfileDTO>, Box<dyn std::error::Error>> {
+    let mut profiles = match find_player_id_by_api(name).await {
+        Ok(profiles) => profiles,
+        Err(_) => Vec::new(),
+    };
+    if profiles.is_empty() {
+        profiles = find_player_id_by_db(pool, name).await?;
+    }
+    Ok(profiles)
 }
 
 pub async fn get_player_stats_by_name(
@@ -155,13 +169,7 @@ pub async fn get_player_stats_by_name(
         (*session_id).parse::<HeaderValue>().unwrap(),
     );
 
-    let mut profiles = match find_player_id_by_api(name).await {
-        Ok(profiles) => profiles,
-        Err(_) => Vec::new(),
-    };
-    if profiles.is_empty() {
-        profiles = find_player_id_by_db(pool, name).await?;
-    }
+    let mut profiles = get_player_profiles_by_name(pool, name).await?;
 
     let mut results: Vec<StatsDTO> = Vec::new();
     let urls = profiles
@@ -192,19 +200,13 @@ pub async fn get_player_stats_by_name(
         match create_user(&pool, &profile.id).await {
             Ok(_) => println!("Created or update user {}", &profile.id),
             Err(e) => {
-                println!(
-                    "Failed to create or update user {}: {:?}", 
-                    &profile.id, e
-                )
+                println!("Failed to create or update user {}: {:?}", &profile.id, e)
             }
         }
         let name = match &profile.name {
             Some(n) => (*n).clone(),
             None => {
-                println!(
-                    "Failed to get name for user {}", 
-                    &profile.id
-                );
+                println!("Failed to get name for user {}", &profile.id);
                 let url = format!(
                     "https://public-ubiservices.ubi.com/v2/profiles?userId={}&platformType=uplay",
                     &profile.id
@@ -215,8 +217,7 @@ pub async fn get_player_stats_by_name(
                     .send()
                     .await?
                     .json::<Value>()
-                    .await?
-                        ["profiles"][0]["nameOnPlatform"]
+                        .await?["profiles"][0]["nameOnPlatform"]
                         .as_str()
                         .unwrap()
                         .to_string();
@@ -281,59 +282,86 @@ pub async fn get_div1_player_stats(
     .await)
 }
 
-pub static DIV2_SPACE_ID: &str = "60859c37-949d-49e2-8fc8-6d8dc40f1a9e";
+// pub static DIV2_SPACE_ID: &str = "60859c37-949d-49e2-8fc8-6d8dc40f1a9e";
+pub static TRACKER_URL: &str = "https://api.tracker.gg/api/v2/division-2/standard/profile/uplay/";
 pub async fn get_div2_player_stats(
     pool: &Pool<Sqlite>,
     name: &str,
 ) -> Result<Vec<D2PlayerStats>, Box<dyn std::error::Error>> {
-    let res = get_player_stats_by_name(pool, name, DIV2_SPACE_ID).await?;
+    let mut profiles = match find_player_id_by_api(&name).await {
+        Ok(profiles) => profiles,
+        Err(_) => vec![],
+    };
 
-    Ok(join_all(res.into_iter().map(|r| async move {
-        let s = r.stats;
-        let p = r.profile;
-
-        let hs = s[2]["value"].as_str().unwrap().parse::<u64>().unwrap_or(0);
-        let hits = s[19]["value"].as_str().unwrap().parse::<u64>().unwrap_or(0);
-        let ratio = if hits > 0 {
-            hs as f32 / hits as f32
-        } else {
-            0f32
-        };
-        D2PlayerStats {
-            id: p.id.clone(),
-            name: p.name.unwrap_or("".to_string()),
-            pvp_kills: s[0]["value"].as_str().unwrap().parse::<u64>().unwrap_or(0),
-            npc_kills: s[1]["value"].as_str().unwrap().parse::<u64>().unwrap_or(0),
-            headshots: hs,
-            skill_kills: s[3]["value"].as_str().unwrap().parse::<u64>().unwrap_or(0),
-            items_looted: s[4]["value"].as_str().unwrap().parse::<u64>().unwrap_or(0),
-            longest_rogue: s[5]["value"].as_str().unwrap().parse::<u64>().unwrap_or(0) / 60,
-            level: s[6]["value"].as_str().unwrap().parse::<u64>().unwrap_or(0),
-            dz_rank: s[7]["value"].as_str().unwrap().parse::<u64>().unwrap_or(0),
-            white_zone_xp: s[8]["value"].as_str().unwrap().parse::<u64>().unwrap_or(0),
-            dark_zone_xp: s[9]["value"].as_str().unwrap().parse::<u64>().unwrap_or(0),
-            pvp_xp: s[10]["value"].as_str().unwrap().parse::<u64>().unwrap_or(0),
-            clan_xp: s[11]["value"].as_str().unwrap().parse::<u64>().unwrap_or(0),
-            commendation_score: s[12]["value"].as_str().unwrap().parse::<u64>().unwrap_or(0),
-            e_credit: s[13]["value"].as_str().unwrap().parse::<u64>().unwrap_or(0),
-            total_playtime: s[14]["value"].as_str().unwrap().parse::<u64>().unwrap_or(0) / 3600,
-            dz_playtime: s[15]["value"].as_str().unwrap().parse::<u64>().unwrap_or(0) / 3600,
-            rogue_playtime: s[16]["value"].as_str().unwrap().parse::<u64>().unwrap_or(0) / 3600,
-            white_zone_pve_kills: s[17]["value"].as_str().unwrap().parse::<u64>().unwrap_or(0),
-            dark_zone_pve_kills: s[18]["value"].as_str().unwrap().parse::<u64>().unwrap_or(0),
-            total_hits: hits,
-            crit_hits: s[20]["value"].as_str().unwrap().parse::<u64>().unwrap_or(0),
-            gear_score: s[21]["value"].as_str().unwrap().parse::<u64>().unwrap_or(0),
-            world_tier: s[22]["value"]
-                .as_str()
-                .unwrap_or("No World Tier")
-                .to_string(),
-            conflict_rank: s[23]["value"].as_str().unwrap().parse::<u64>().unwrap_or(0),
-            headshots_hits_ratio: ratio,
-            all_names: get_user_names_by_id(pool, p.id.clone().as_str())
-                .await
-                .unwrap_or(Vec::new()),
+    if profiles.is_empty() {
+        profiles = find_player_id_by_db(pool, &name).await?;
+        if profiles.is_empty() {
+            return Err(format!("Failed to find player {} by either api or db", name).into());
         }
-    }))
-    .await)
+    } else {
+        match create_user(&pool, &profiles[0].id).await {
+            Ok(_) => println!("Created or update user {}", &profiles[0].id),
+            Err(e) => {
+                println!("Failed to create or update user {}: {:?}", &profiles[0].id, e)
+            }
+        }
+    }
+
+    let p = &profiles[0];
+    let p_name = p.name.clone().unwrap();
+    match store_user_name(&pool, &p.id, &p_name).await {
+        Ok(_) => println!("Stored name {} for user {}", &p_name, &p.id),
+        Err(e) => {
+            println!(
+                "Failed to store name {} for user {}: {:?}",
+                &name, &p.id, e
+            );
+        }
+    }
+
+    let caps = DesiredCapabilities::chrome();
+    let driver = WebDriver::new("http://localhost:9515", caps).await?;
+    driver.goto(format!("{}{}", TRACKER_URL, p.name.clone().unwrap_or("".to_string()))).await.unwrap();
+    let data = driver.find(By::Css("body")).await?.text().await?;
+    driver.quit().await?;
+
+    let metadata: Value = from_str(&data)?;
+    let stats = &metadata["data"]["segments"][0]["stats"];
+    
+    Ok(vec![D2PlayerStats {
+        id: p.id.clone(),
+        name: p.name.clone().unwrap_or("".to_string()),
+        total_playtime: stats["timePlayed"]["value"].as_u64().unwrap_or(0) / 3600,
+        level: stats["highestPlayerLevel"]["value"].as_u64().unwrap_or(0),
+        pvp_kills: stats["killsPvP"]["value"].as_u64().unwrap_or(0),
+        npc_kills: stats["killsNpc"]["value"].as_u64().unwrap_or(0),
+        headshots: stats["headshots"]["value"].as_u64().unwrap_or(0),
+        headshot_kills: stats["killsHeadshot"]["value"].as_u64().unwrap_or(0),
+        shotgun_kills: stats["killsWeaponShotgun"]["value"].as_u64().unwrap_or(0),
+        smg_kills: stats["killsWeaponSubMachinegun"]["value"].as_u64().unwrap_or(0),
+        pistol_kills: stats["killsWeaponPistol"]["value"].as_u64().unwrap_or(0),
+        rifle_kills: stats["killsWeaponRifle"]["value"].as_u64().unwrap_or(0),
+        player_kills: stats["playersKilled"]["value"].as_u64().unwrap_or(0),
+        xp_total: stats["xPTotal"]["value"].as_u64().unwrap_or(0),
+        pve_xp: stats["xPPve"]["value"].as_u64().unwrap_or(0),
+        pvp_xp: stats["xPPvp"]["value"].as_u64().unwrap_or(0),
+        clan_xp: stats["xPClan"]["value"].as_u64().unwrap_or(0),
+        sharpshooter_kills: stats["killsSpecializationSharpshooter"]["value"].as_u64().unwrap_or(0),
+        survivalist_kills: stats["killsSpecializationSurvivalist"]["value"].as_u64().unwrap_or(0),
+        demolitionist_kills: stats["killsSpecializationDemolitionist"]["value"].as_u64().unwrap_or(0),
+        e_credit: stats["eCreditBalance"]["value"].as_u64().unwrap_or(0),
+        commendation_count: stats["commendationCount"]["value"].as_u64().unwrap_or(0),
+        commendation_score: stats["commendationScore"]["value"].as_u64().unwrap_or(0),
+        gear_score: stats["latestGearScore"]["value"].as_u64().unwrap_or(0),
+        dz_rank: stats["rankDZ"]["value"].as_u64().unwrap_or(0),
+        dz_playtime: stats["timePlayedDarkZone"]["value"].as_u64().unwrap_or(0) / 3600,
+        rogues_killed: stats["roguesKilled"]["value"].as_u64().unwrap_or(0),
+        rogue_playtime: stats["timePlayedRogue"]["value"].as_u64().unwrap_or(0) / 3600,
+        longest_rogue: stats["timePlayedRogueLongest"]["value"].as_u64().unwrap_or(0) / 60,
+        conflict_rank: stats["latestConflictRank"]["value"].as_u64().unwrap_or(0),
+        conflict_playtime: stats["timePlayedConflict"]["value"].as_u64().unwrap_or(0) / 3600,
+        all_names: get_user_names_by_id(pool, profiles[0].id.clone().as_str())
+            .await
+            .unwrap_or(vec![])
+    }])
 }

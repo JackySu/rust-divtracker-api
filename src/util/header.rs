@@ -2,7 +2,7 @@ use reqwest::header;
 
 pub static USER_AGENT: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/113.0.0.0 Safari/537.36";
 pub static CONTENT_TYPE: &str = "application/json; charset=utf-8";
-pub static ACCEPT: &str = "application/json";
+pub static ACCEPT: &str = "application/json, text/plain, */*";
 pub static REQUEST_PLATFORM_TYPE: &str = "uplay";
 pub static REQUEST_WITH: &str = "XMLHttpRequest";
 pub static CACHE_CONTROL: &str = "no-cache";
