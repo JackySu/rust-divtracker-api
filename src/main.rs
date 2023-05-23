@@ -20,7 +20,6 @@ use api::wrapper::{get_div1_player_stats, get_div2_player_stats};
 use api::ubi::login_ubi;
 
 use sqlx::{Pool, Sqlite, SqlitePool};
-use thirtyfour::prelude::WebDriver;
 
 #[get("/")]
 async fn index() -> &'static str {
@@ -42,8 +41,8 @@ async fn get_div1_player_stats_by_name(_limitguard: RocketGovernor<'_, RateLimit
 }
 
 #[get("/div2/<name>")]
-async fn get_div2_player_stats_by_name(_limitguard: RocketGovernor<'_, RateLimitGuard>, pool: &State<Pool<Sqlite>>, driver: &State<WebDriver>, name: &str) -> status::Custom<Json<Response>> {
-    let stats = get_div2_player_stats(pool, driver, name).await;
+async fn get_div2_player_stats_by_name(_limitguard: RocketGovernor<'_, RateLimitGuard>, pool: &State<Pool<Sqlite>>, name: &str) -> status::Custom<Json<Response>> {
+    let stats = get_div2_player_stats(pool, name).await;
     status::Custom(
         Status::from_code(stats.status_code).unwrap(),
         Json(stats.response),
@@ -77,8 +76,6 @@ async fn main() -> Result<(), rocket::Error> {
             "/", 
             catchers![not_found, exceed_rate_limit, internal_server_error])
         .manage(pool)
-        .manage(util::webdriver::get_webdriver()
-            .await.unwrap())
         .attach(Cors)
         .launch()
         .await?;

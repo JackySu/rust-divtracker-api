@@ -286,7 +286,6 @@ pub async fn get_div1_player_stats(
 pub static TRACKER_URL: &str = "https://api.tracker.gg/api/v2/division-2/standard/profile/uplay/";
 pub async fn get_div2_player_stats(
     pool: &Pool<Sqlite>,
-    driver: &WebDriver,
     name: &str,
 ) -> Result<Vec<D2PlayerStats>, Box<dyn std::error::Error>> {
     let mut profiles = match find_player_id_by_api(&name).await {
@@ -320,8 +319,10 @@ pub async fn get_div2_player_stats(
         }
     }
 
+    let driver = util::webdriver::get_webdriver().await?;
     driver.goto(format!("{}{}", TRACKER_URL, p.name.clone().unwrap_or("".to_string()))).await.unwrap();
     let data = driver.find(By::Css("body")).await?.text().await?;
+    driver.quit().await?;
 
     let metadata: Value = from_str(&data)?;
     let stats = &metadata["data"]["segments"][0]["stats"];
