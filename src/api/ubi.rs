@@ -65,7 +65,7 @@ pub async fn find_player_id_by_db(
         Ok(id) => id,
         Err(_) => return Err(format!("Failed to find player {} in db", name).into()),
     };
-    let mut profiles = Vec::new();
+    let mut profiles = vec![];
     for id in ids {
         profiles.push(ProfileDTO { id: id, name: None });
     }
@@ -143,7 +143,7 @@ pub async fn get_player_profiles_by_name(
 ) -> Result<Vec<ProfileDTO>, Box<dyn std::error::Error>> {
     let mut profiles = match find_player_id_by_api(name).await {
         Ok(profiles) => profiles,
-        Err(_) => Vec::new(),
+        Err(_) => vec![],
     };
     if profiles.is_empty() {
         profiles = find_player_id_by_db(pool, name).await?;
@@ -171,7 +171,7 @@ pub async fn get_player_stats_by_name(
 
     let mut profiles = get_player_profiles_by_name(pool, name).await?;
 
-    let mut results: Vec<StatsDTO> = Vec::new();
+    let mut results: Vec<StatsDTO> = vec![];
     let urls = profiles
         .iter()
         .map(|p| {
@@ -187,7 +187,7 @@ pub async fn get_player_stats_by_name(
     let stream =
         futures::stream::iter(urls).map(|url| client.get(&url).headers(headers.clone()).send());
 
-    let mut stream = stream.buffered(10);
+    let mut stream = stream.buffered(5);
 
     let mut i = 0;
     while let Some(result) = stream.next().await {
@@ -274,7 +274,7 @@ pub async fn get_div1_player_stats(
                     gear_score: s[11]["value"].as_str().unwrap().parse::<u64>().unwrap_or(0),
                     all_names: get_user_names_by_id(pool, p.id.clone().as_str())
                         .await
-                        .unwrap_or(Vec::new()),
+                        .unwrap_or(vec![]),
                 }
             })
             .collect::<Vec<_>>(),
@@ -319,15 +319,16 @@ pub async fn get_div2_player_stats(
         }
     }
 
-    let caps = DesiredCapabilities::chrome();
-    let driver = WebDriver::new("http://localhost:9515", caps).await?;
+    let driver = util::webdriver::get_webdriver().await?;
     driver.goto(format!("{}{}", TRACKER_URL, p.name.clone().unwrap_or("".to_string()))).await.unwrap();
     let data = driver.find(By::Css("body")).await?.text().await?;
-    driver.quit().await?;
 
     let metadata: Value = from_str(&data)?;
     let stats = &metadata["data"]["segments"][0]["stats"];
     
+    if stats.is_null() {
+        return Err(format!("player {} exists but no profile for this game", name).into());
+    }
     Ok(vec![D2PlayerStats {
         id: p.id.clone(),
         name: p.name.clone().unwrap_or("".to_string()),

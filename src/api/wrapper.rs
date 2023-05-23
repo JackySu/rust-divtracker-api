@@ -14,7 +14,7 @@ pub async fn get_div1_player_stats(pool: &Pool<Sqlite>, name: &str) -> ResponseW
         },
         Err(err) => {
             println!("Error: {}", err);
-            ResponseWithStatus::new(ApiStatus::BadRequest, message::MESSAGE_USER_NOT_FOUND.to_string(), None)
+            ResponseWithStatus::new(ApiStatus::NotFound, err.to_string(), None)
         }
     }
 }
@@ -27,7 +27,7 @@ pub async fn get_div2_player_stats(pool: &Pool<Sqlite>, name: &str) -> ResponseW
         },
         Err(err) => {
             println!("Error: {}", err);
-            ResponseWithStatus::new(ApiStatus::BadRequest, message::MESSAGE_USER_NOT_FOUND.to_string(), None)
+            ResponseWithStatus::new(ApiStatus::NotFound, err.to_string(), None)
         }
     }
 }
