@@ -7,6 +7,7 @@ use sqlx::{Pool, Sqlite};
 use std::sync::Mutex;
 use anyhow::{anyhow, Result};
 use futures::{future::join_all, StreamExt};
+use base64::Engine;
 
 use crate::db::user::{create_user, get_user_id_by_name, get_user_names_by_id, store_user_name};
 use crate::model::div::{D1PlayerStats, D2PlayerStats};
@@ -53,7 +54,8 @@ pub async fn login_ubi() -> Result<()> {
         std::env::var("UBI_USERNAME").expect("UBI_USERNAME not set"),
         std::env::var("UBI_PASSWORD").expect("UBI_PASSWORD not set")
     );
-    let auth = base64::encode(userpass.as_bytes()).as_str().to_owned();
+    let mut auth = String::new();
+    base64::engine::general_purpose::STANDARD.encode_string(userpass.as_bytes(), &mut auth);
     headers.insert("Authorization", format!("Basic {}", auth).parse().unwrap());
 
     let resp = reqwest::Client::new()
