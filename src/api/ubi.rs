@@ -57,6 +57,7 @@ pub async fn login_ubi() -> Result<()> {
     let mut auth = String::new();
     base64::engine::general_purpose::STANDARD.encode_string(userpass.as_bytes(), &mut auth);
     headers.insert("Authorization", format!("Basic {}", auth).parse().unwrap());
+    auth.clear();
 
     let resp = reqwest::Client::new()
         .post(UBI_LOGIN_URL)
