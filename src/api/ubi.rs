@@ -25,7 +25,7 @@ pub async fn check_expiration_date() -> Result<()> {
     let mut exp = DateTime::parse_from_rfc3339(&expiration)
         .unwrap()
         .with_timezone(&Utc);
-    let mut now = Utc::now();
+    let mut now = Utc::now() + chrono::Duration::minutes(5);
 
     let mut login_counts = 0;
     while exp < now && login_counts < 5 {
@@ -36,7 +36,7 @@ pub async fn check_expiration_date() -> Result<()> {
         exp = DateTime::parse_from_rfc3339(&expiration)
             .unwrap()
             .with_timezone(&Utc);
-        now = Utc::now();
+        now = Utc::now() + chrono::Duration::minutes(5);
     }
     if login_counts >= 5 {
         return Err(anyhow!("Failed to login after 5 trials"));
