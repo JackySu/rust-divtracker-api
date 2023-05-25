@@ -20,6 +20,7 @@ use api::wrapper::{get_div1_player_stats, get_div2_player_stats};
 use api::ubi::login_ubi;
 
 use sqlx::{Pool, Sqlite, SqlitePool};
+use anyhow::Result;
 
 #[get("/")]
 async fn index() -> &'static str {
@@ -50,13 +51,13 @@ async fn get_div2_player_stats_by_name(_limitguard: RocketGovernor<'_, RateLimit
 }
 
 #[rocket::main]
-async fn main() -> Result<(), rocket::Error> {
+async fn main() -> Result<()> {
     dotenv::dotenv().ok();
     let pool = SqlitePool::connect(std::env::var("DATABASE_URL").expect("DATABASE_URL must be set").as_str())
         .await
         .expect("Couldn't connect to sqlite database");
 
-    let _ = login_ubi().await;
+    let _ = login_ubi().await?;
     sqlx::migrate!()
         .run(&pool)
         .await

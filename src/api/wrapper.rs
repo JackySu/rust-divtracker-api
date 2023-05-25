@@ -13,7 +13,7 @@ pub async fn get_div1_player_stats(pool: &Pool<Sqlite>, name: &str) -> ResponseW
             ResponseWithStatus::new(ApiStatus::Ok, message::MESSAGE_USER_EXISTS.to_string(), Some(json!(stats)))
         },
         Err(err) => {
-            println!("Error: {}", err);
+            println!("Error: {}\nwhen querying player {}", err, name);
             ResponseWithStatus::new(ApiStatus::NotFound, err.to_string(), None)
         }
     }
@@ -26,7 +26,7 @@ pub async fn get_div2_player_stats(pool: &Pool<Sqlite>, name: &str) -> ResponseW
             ResponseWithStatus::new(ApiStatus::Ok, message::MESSAGE_USER_EXISTS.to_string(), Some(json!(stats)))
         },
         Err(err) => {
-            println!("Error: {}", err);
+            println!("Error: {}\nwhen querying player {}", err, name);
             ResponseWithStatus::new(ApiStatus::NotFound, err.to_string(), None)
         }
     }

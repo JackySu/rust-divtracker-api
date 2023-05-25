@@ -5,7 +5,7 @@ use thirtyfour::prelude::*;
 use serde_json::{from_str, Value};
 use sqlx::{Pool, Sqlite};
 use std::sync::Mutex;
-
+use anyhow::{anyhow, Result};
 use futures::{future::join_all, StreamExt};
 
 use crate::db::user::{create_user, get_user_id_by_name, get_user_names_by_id, store_user_name};
@@ -20,8 +20,32 @@ lazy_static! {
         Mutex::new("2015-11-12T00:00:00.0000000Z".to_string());
 }
 
+pub async fn check_expiration_date() -> Result<()> {
+    let expiration = UBI_EXPIRATION.lock().unwrap().clone();
+    let mut exp = DateTime::parse_from_rfc3339(&expiration)
+        .unwrap()
+        .with_timezone(&Utc);
+    let mut now = Utc::now();
+
+    let mut login_counts = 0;
+    while exp < now && login_counts < 5 {
+        login_ubi().await?;
+        login_counts += 1;
+        println!("Renewed Ubi ticket at {}", now.to_rfc3339());
+        let expiration = UBI_EXPIRATION.lock().unwrap().clone();
+        exp = DateTime::parse_from_rfc3339(&expiration)
+            .unwrap()
+            .with_timezone(&Utc);
+        now = Utc::now();
+    }
+    if login_counts >= 5 {
+        return Err(anyhow!("Failed to login after 5 trials"));
+    }
+    Ok(())
+}
+
 pub static UBI_LOGIN_URL: &str = "https://public-ubiservices.ubi.com/v3/profiles/sessions";
-pub async fn login_ubi() -> Result<(), Box<dyn std::error::Error>> {
+pub async fn login_ubi() -> Result<()> {
     let mut headers = util::header::get_common_header().await;
 
     let userpass = format!(
@@ -42,7 +66,7 @@ pub async fn login_ubi() -> Result<(), Box<dyn std::error::Error>> {
 
     if !resp["errorCode"].is_null() {
         println!("{:#?}", resp);
-        return Err("Failed to login to Ubi".into());
+        return Err(anyhow!("Failed to login to ubi"));
     }
 
     let mut ticket = UBI_TICKET.lock().unwrap();
@@ -60,10 +84,10 @@ pub async fn login_ubi() -> Result<(), Box<dyn std::error::Error>> {
 pub async fn find_player_id_by_db(
     pool: &Pool<Sqlite>,
     name: &str,
-) -> Result<Vec<ProfileDTO>, Box<dyn std::error::Error>> {
+) -> Result<Vec<ProfileDTO>> {
     let ids = match get_user_id_by_name(pool, name).await {
         Ok(id) => id,
-        Err(_) => return Err(format!("Failed to find player {} in db", name).into()),
+        Err(_) => return Err(anyhow!(format!("Failed to find player {} in db", name))),
     };
     let mut profiles = vec![];
     for id in ids {
@@ -74,26 +98,10 @@ pub async fn find_player_id_by_db(
 
 pub async fn find_player_id_by_api(
     name: &str,
-) -> Result<Vec<ProfileDTO>, Box<dyn std::error::Error>> {
-    let expiration = UBI_EXPIRATION.lock().unwrap().clone();
-    let mut exp = DateTime::parse_from_rfc3339(&expiration)
-        .unwrap()
-        .with_timezone(&Utc);
-    let mut now = Utc::now();
-
-    let mut login_counts = 0;
-    while exp < now && login_counts < 5 {
-        login_ubi().await?;
-        login_counts += 1;
-        println!("Renewed Ubi ticket at {}", now.to_rfc3339());
-        let expiration = UBI_EXPIRATION.lock().unwrap().clone();
-        exp = DateTime::parse_from_rfc3339(&expiration)
-            .unwrap()
-            .with_timezone(&Utc);
-        now = Utc::now();
-    }
-    if login_counts >= 5 {
-        return Err("Failed to login after 5 trials".into());
+) -> Result<Vec<ProfileDTO>> {
+    match check_expiration_date().await {
+        Ok(_) => (),
+        Err(e) => return Err(anyhow!(e)),
     }
 
     let ticket = UBI_TICKET.lock().unwrap().clone();
@@ -123,7 +131,7 @@ pub async fn find_player_id_by_api(
 
     let profiles = &resp["profiles"];
     if profiles.is_array() && profiles.as_array().unwrap().is_empty() {
-        return Err(format!("Failed to find player {} by api", name).into());
+        return Err(anyhow!(format!("Failed to find player {} by api", name)));
     }
 
     Ok(profiles
@@ -140,7 +148,7 @@ pub async fn find_player_id_by_api(
 pub async fn get_player_profiles_by_name(
     pool: &Pool<Sqlite>,
     name: &str,
-) -> Result<Vec<ProfileDTO>, Box<dyn std::error::Error>> {
+) -> Result<Vec<ProfileDTO>> {
     let mut profiles = match find_player_id_by_api(name).await {
         Ok(profiles) => profiles,
         Err(_) => vec![],
@@ -155,7 +163,12 @@ pub async fn get_player_stats_by_name(
     pool: &Pool<Sqlite>,
     name: &str,
     game_space_id: &str,
-) -> Result<Vec<StatsDTO>, Box<dyn std::error::Error>> {
+) -> Result<Vec<StatsDTO>> {
+    match check_expiration_date().await {
+        Ok(_) => (),
+        Err(e) => return Err(anyhow!(e)),
+    }
+
     let mut headers = util::header::get_common_header().await;
     let ticket = UBI_TICKET.lock().unwrap().clone();
     headers.insert(
@@ -194,7 +207,7 @@ pub async fn get_player_stats_by_name(
         let resp = result?.json::<Value>().await?;
         if !resp["errorCode"].is_null() {
             println!("{:#?}", resp);
-            return Err("Failed to login to Ubi".into());
+            return Err(anyhow!("Failed to get stats for user {}", &profiles[i].id));
         }
         let profile = &mut profiles[i];
         match create_user(&pool, &profile.id).await {
@@ -243,7 +256,7 @@ pub async fn get_player_stats_by_name(
     }
 
     if results.is_empty() {
-        return Err(format!("Failed to find player {} by either api or db", name).into());
+        return Err(anyhow!(format!("Failed to find player {} by either api or db", name)));
     }
     Ok(results)
 }
@@ -252,7 +265,7 @@ pub static DIV1_SPACE_ID: &str = "6edd234a-abff-4e90-9aab-b9b9c6e49ff7";
 pub async fn get_div1_player_stats(
     pool: &Pool<Sqlite>,
     name: &str,
-) -> Result<Vec<D1PlayerStats>, Box<dyn std::error::Error>> {
+) -> Result<Vec<D1PlayerStats>> {
     let res = get_player_stats_by_name(pool, name, DIV1_SPACE_ID).await?;
     Ok(join_all(
         res.into_iter()
@@ -287,7 +300,7 @@ pub static TRACKER_URL: &str = "https://api.tracker.gg/api/v2/division-2/standar
 pub async fn get_div2_player_stats(
     pool: &Pool<Sqlite>,
     name: &str,
-) -> Result<Vec<D2PlayerStats>, Box<dyn std::error::Error>> {
+) -> Result<Vec<D2PlayerStats>> {
     let mut profiles = match find_player_id_by_api(&name).await {
         Ok(profiles) => profiles,
         Err(_) => vec![],
@@ -296,7 +309,7 @@ pub async fn get_div2_player_stats(
     if profiles.is_empty() {
         profiles = find_player_id_by_db(pool, &name).await?;
         if profiles.is_empty() {
-            return Err(format!("Failed to find player {} by either api or db", name).into());
+            return Err(anyhow!(format!("Failed to find player {} by either api or db", name)));
         }
     } else {
         match create_user(&pool, &profiles[0].id).await {
@@ -328,7 +341,7 @@ pub async fn get_div2_player_stats(
     let stats = &metadata["data"]["segments"][0]["stats"];
     
     if stats.is_null() {
-        return Err(format!("player {} exists but no profile for this game", name).into());
+        return Err(anyhow!(format!("player {} exists but no profile for this game", name)));
     }
     Ok(vec![D2PlayerStats {
         id: p.id.clone(),
