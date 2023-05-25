@@ -102,9 +102,8 @@ pub async fn find_player_id_by_db(
 pub async fn find_player_id_by_api(
     name: &str,
 ) -> Result<Vec<ProfileDTO>> {
-    match check_expiration_date().await {
-        Ok(_) => (),
-        Err(e) => return Err(anyhow!(e)),
+    if let Err(e) = check_expiration_date().await {
+        return Err(anyhow!(e))
     }
 
     let ticket = UBI_TICKET.lock().unwrap().clone();
@@ -167,9 +166,8 @@ pub async fn get_player_stats_by_name(
     name: &str,
     game_space_id: &str,
 ) -> Result<Vec<StatsDTO>> {
-    match check_expiration_date().await {
-        Ok(_) => (),
-        Err(e) => return Err(anyhow!(e)),
+    if let Err(e) = check_expiration_date().await {
+        return Err(anyhow!(e))
     }
 
     let mut headers = util::header::get_common_header().await;
