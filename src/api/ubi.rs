@@ -5,7 +5,7 @@ use thirtyfour::prelude::*;
 use serde_json::{from_str, Value};
 use sqlx::{Pool, Sqlite};
 use std::sync::Mutex;
-use anyhow::{anyhow, Result};
+use anyhow::anyhow;
 use futures::{future::join_all, StreamExt};
 use base64::Engine;
 
@@ -21,7 +21,7 @@ lazy_static! {
         Mutex::new("2015-11-12T00:00:00.0000000Z".to_string());
 }
 
-pub async fn check_expiration_date() -> Result<()> {
+pub async fn check_expiration_date() -> anyhow::Result<()> {
     let expiration = UBI_EXPIRATION.lock().unwrap().clone();
     let mut exp = DateTime::parse_from_rfc3339(&expiration)
         .unwrap()
@@ -46,7 +46,7 @@ pub async fn check_expiration_date() -> Result<()> {
 }
 
 pub static UBI_LOGIN_URL: &str = "https://public-ubiservices.ubi.com/v3/profiles/sessions";
-pub async fn login_ubi() -> Result<()> {
+pub async fn login_ubi() -> anyhow::Result<()> {
     let mut headers = util::header::get_common_header().await;
 
     let userpass = format!(
@@ -87,11 +87,11 @@ pub async fn login_ubi() -> Result<()> {
 pub async fn find_player_id_by_db(
     pool: &Pool<Sqlite>,
     name: &str,
-) -> Result<Vec<ProfileDTO>> {
-    let ids = match get_user_id_by_name(pool, name).await {
-        Ok(id) => id,
-        Err(_) => return Err(anyhow!(format!("Failed to find player {} in db", name))),
-    };
+) -> anyhow::Result<Vec<ProfileDTO>> {
+    let ids = get_user_id_by_name(pool, name)
+        .await
+        .map_err(|e| anyhow!("Failed to find player {} by db\nError: {}", name, e))?;
+
     let mut profiles = vec![];
     for id in ids {
         profiles.push(ProfileDTO { id: id, name: None });
@@ -101,7 +101,7 @@ pub async fn find_player_id_by_db(
 
 pub async fn find_player_id_by_api(
     name: &str,
-) -> Result<Vec<ProfileDTO>> {
+) -> anyhow::Result<Vec<ProfileDTO>> {
     if let Err(e) = check_expiration_date().await {
         return Err(anyhow!(e))
     }
@@ -133,7 +133,7 @@ pub async fn find_player_id_by_api(
 
     let profiles = &resp["profiles"];
     if profiles.is_array() && profiles.as_array().unwrap().is_empty() {
-        return Err(anyhow!(format!("Failed to find player {} by api", name)));
+        return Err(anyhow!("Failed to find player {} by api", name));
     }
 
     Ok(profiles
@@ -150,11 +150,9 @@ pub async fn find_player_id_by_api(
 pub async fn get_player_profiles_by_name(
     pool: &Pool<Sqlite>,
     name: &str,
-) -> Result<Vec<ProfileDTO>> {
-    let mut profiles = match find_player_id_by_api(name).await {
-        Ok(profiles) => profiles,
-        Err(_) => vec![],
-    };
+) -> anyhow::Result<Vec<ProfileDTO>> {
+    let mut profiles = find_player_id_by_api(name).await.unwrap_or(vec![]);
+
     if profiles.is_empty() {
         profiles = find_player_id_by_db(pool, name).await?;
     }
@@ -165,7 +163,7 @@ pub async fn get_player_stats_by_name(
     pool: &Pool<Sqlite>,
     name: &str,
     game_space_id: &str,
-) -> Result<Vec<StatsDTO>> {
+) -> anyhow::Result<Vec<StatsDTO>> {
     if let Err(e) = check_expiration_date().await {
         return Err(anyhow!(e))
     }
@@ -257,7 +255,7 @@ pub async fn get_player_stats_by_name(
     }
 
     if results.is_empty() {
-        return Err(anyhow!(format!("Failed to find player {} by either api or db", name)));
+        return Err(anyhow!("Failed to find player {} by either api or db", name));
     }
     Ok(results)
 }
@@ -266,7 +264,7 @@ pub static DIV1_SPACE_ID: &str = "6edd234a-abff-4e90-9aab-b9b9c6e49ff7";
 pub async fn get_div1_player_stats(
     pool: &Pool<Sqlite>,
     name: &str,
-) -> Result<Vec<D1PlayerStats>> {
+) -> anyhow::Result<Vec<D1PlayerStats>> {
     let res = get_player_stats_by_name(pool, name, DIV1_SPACE_ID).await?;
     Ok(join_all(
         res.into_iter()
@@ -301,16 +299,13 @@ pub static TRACKER_URL: &str = "https://api.tracker.gg/api/v2/division-2/standar
 pub async fn get_div2_player_stats(
     pool: &Pool<Sqlite>,
     name: &str,
-) -> Result<Vec<D2PlayerStats>> {
-    let mut profiles = match find_player_id_by_api(&name).await {
-        Ok(profiles) => profiles,
-        Err(_) => vec![],
-    };
+) -> anyhow::Result<Vec<D2PlayerStats>> {
+    let mut profiles = find_player_id_by_api(&name).await.unwrap_or(vec![]);
 
     if profiles.is_empty() {
         profiles = find_player_id_by_db(pool, &name).await?;
         if profiles.is_empty() {
-            return Err(anyhow!(format!("Failed to find player {} by either api or db", name)));
+            return Err(anyhow!("Failed to find player {} by either api or db", name));
         }
     } else {
         match create_user(&pool, &profiles[0].id).await {
@@ -342,7 +337,7 @@ pub async fn get_div2_player_stats(
     let stats = &metadata["data"]["segments"][0]["stats"];
     
     if stats.is_null() {
-        return Err(anyhow!(format!("player {} exists but no profile for this game", name)));
+        return Err(anyhow!("player {} exists but no profile for this game", name));
     }
     Ok(vec![D2PlayerStats {
         id: p.id.clone(),
