@@ -63,19 +63,16 @@ async fn main() -> Result<()> {
         .await
         .expect("Couldn't migrate the database tables");
 
-    let config = rocket::Config {
-        address: std::net::IpAddr::V4(std::net::Ipv4Addr::new(0, 0, 0, 0)),
-        ..Default::default()
-    };
-
-    let _rocket = rocket::custom(config)
+    let _rocket = rocket::build()
         .mount(
             "/api", 
-            routes![get_div1_player_stats_by_name, get_div2_player_stats_by_name])
+            routes![get_div1_player_stats_by_name, get_div2_player_stats_by_name]
+        )
         .mount("/", routes![index])
         .register(
             "/", 
-            catchers![not_found, exceed_rate_limit, internal_server_error])
+            catchers![not_found, exceed_rate_limit, internal_server_error]
+        )
         .manage(pool)
         .attach(Cors)
         .launch()

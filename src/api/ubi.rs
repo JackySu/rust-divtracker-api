@@ -100,8 +100,12 @@ pub async fn find_player_id_by_db(
 }
 
 pub async fn find_player_id_by_api(
-    name: &str,
+    name: Option<&str>,
+    id: Option<&str>
 ) -> anyhow::Result<Vec<ProfileDTO>> {
+    if name.is_none() && id.is_none() {
+        return Err(anyhow!("Both name and id are None"));
+    }
     if let Err(e) = check_expiration_date().await {
         return Err(anyhow!(e))
     }
@@ -119,10 +123,16 @@ pub async fn find_player_id_by_api(
         (*session_id).parse::<HeaderValue>().unwrap(),
     );
 
-    let url = format!(
-        "https://public-ubiservices.ubi.com/v2/profiles?nameOnPlatform={}&platformType=uplay",
-        name
-    );
+    let mut url = String::from("https://public-ubiservices.ubi.com/v2/profiles?platformType=uplay&");
+    if name.is_some() {
+        url.push_str(&format!(
+            "nameOnPlatform={}",
+            name.unwrap()
+        ));
+    } else {
+        url.push_str(&format!("idOnPlatform={}", id.unwrap()));
+    }
+
     let resp = reqwest::Client::new()
         .get(&url)
         .headers(headers)
@@ -133,7 +143,7 @@ pub async fn find_player_id_by_api(
 
     let profiles = &resp["profiles"];
     if profiles.is_array() && profiles.as_array().unwrap().is_empty() {
-        return Err(anyhow!("Failed to find player {} by api", name));
+        return Err(anyhow!("Failed to find player with name: {} id: {} by api", name.clone().unwrap_or(""), id.clone().unwrap_or("")));
     }
 
     Ok(profiles
@@ -151,7 +161,7 @@ pub async fn get_player_profiles_by_name(
     pool: &Pool<Sqlite>,
     name: &str,
 ) -> anyhow::Result<Vec<ProfileDTO>> {
-    let mut profiles = find_player_id_by_api(name).await.unwrap_or(vec![]);
+    let mut profiles = find_player_id_by_api(Some(name), None).await.unwrap_or(vec![]);
 
     if profiles.is_empty() {
         profiles = find_player_id_by_db(pool, name).await?;
@@ -300,13 +310,17 @@ pub async fn get_div2_player_stats(
     pool: &Pool<Sqlite>,
     name: &str,
 ) -> anyhow::Result<Vec<D2PlayerStats>> {
-    let mut profiles = find_player_id_by_api(&name).await.unwrap_or(vec![]);
+    let mut profiles = find_player_id_by_api(Some(name), None).await.unwrap_or(vec![]);
 
     if profiles.is_empty() {
         profiles = find_player_id_by_db(pool, &name).await?;
         if profiles.is_empty() {
             return Err(anyhow!("Failed to find player {} by either api or db", name));
         }
+        for mut profile in profiles.iter_mut() {
+            profile.name = find_player_id_by_api(None, Some(&profile.id)).await?[0].name.clone();
+        }
+
     } else {
         match create_user(&pool, &profiles[0].id).await {
             Ok(_) => println!("Created or update user {}", &profiles[0].id),
@@ -317,7 +331,7 @@ pub async fn get_div2_player_stats(
     }
 
     let p = &profiles[0];
-    let p_name = p.name.clone().unwrap();
+    let p_name = p.name.clone().unwrap_or("".to_string());
     match store_user_name(&pool, &p.id, &p_name).await {
         Ok(_) => println!("Stored name {} for user {}", &p_name, &p.id),
         Err(e) => {
